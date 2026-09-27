@@ -1,17 +1,42 @@
-// Allow overriding the backend base URL via Vite env `VITE_API_BASE`.
-// Falls back to relative `/api` so the app works behind a proxy or in production.
-const BASE_URL = (import.meta.env && import.meta.env.VITE_API_BASE) || (window && window.__API_BASE__) || (window && window.location.origin + '/api');
+// Support setting API via URL parameter (e.g. ?api=https://mean-beers-win.loca.lt/api) or localStorage
+if (typeof window !== 'undefined') {
+  const urlParams = new URLSearchParams(window.location.search);
+  const apiParam = urlParams.get('api');
+  if (apiParam) {
+    let formatted = apiParam.trim();
+    if (!formatted.endsWith('/api')) {
+      formatted = formatted.replace(/\/+$/, '') + '/api';
+    }
+    localStorage.setItem('cq_api_base', formatted);
+  }
+}
+
+const getBaseUrl = () => {
+  if (typeof window !== 'undefined' && localStorage.getItem('cq_api_base')) {
+    return localStorage.getItem('cq_api_base');
+  }
+  if (import.meta.env && import.meta.env.VITE_API_BASE) {
+    return import.meta.env.VITE_API_BASE;
+  }
+  if (typeof window !== 'undefined' && window.__API_BASE__) {
+    return window.__API_BASE__;
+  }
+  return (typeof window !== 'undefined' ? window.location.origin : '') + '/api';
+};
 
 const getToken = () => localStorage.getItem('cq_token');
 
 const headers = () => ({
   'Content-Type': 'application/json',
+  'bypass-tunnel-reminder': 'true',
+  'Bypass-Tunnel-Reminder': 'true',
   ...(getToken() ? { Authorization: `Bearer ${getToken()}` } : {}),
 });
 
 async function request(method, path, body) {
   // Small fetch wrapper with network error handling and clearer messages.
-  const url = `${BASE_URL}${path}`;
+  const baseUrl = getBaseUrl();
+  const url = `${baseUrl}${path}`;
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 10000);
