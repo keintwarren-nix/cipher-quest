@@ -1,0 +1,593 @@
+/* eslint-disable react-hooks/set-state-in-effect, no-unused-vars, react-hooks/immutability, react-hooks/exhaustive-deps */
+import React, { useState, useEffect } from 'react';
+import './CaesarTutorialModal.css';
+import { useAuth } from '../../../../context/AuthContext';
+import { userApi } from '../../../../api/cipherQuestApi';
+
+/**
+ * CAESAR SHIFT TUTORIAL STEPS METADATA
+ * Refactored for HUD-style tactical intel cards & gamified micro-copy
+ */
+const TUTORIAL_STEPS = [
+  {
+    id: 1,
+    title: 'Monoalphabetic Substitution',
+    subtitle: 'What is Caesar Shift?',
+    icon: 'menu_book',
+    conceptTag: 'DIRECTIVE 01 // FOUNDATION',
+    intel1: {
+      tag: 'CORE MECHANIC',
+      title: 'Direct Letter Shift',
+      text: (
+        <>
+          Each character in your message is replaced by a letter a <strong>fixed number of positions</strong> down the alphabet.
+        </>
+      )
+    },
+    intel2: {
+      tag: 'OPERATIVE RULE',
+      title: 'Uniform Spacing',
+      text: (
+        <>
+          Distance remains constant. If <strong>A &rarr; D (+3)</strong>, then <strong>B &rarr; E (+3)</strong> under the exact same shift key.
+        </>
+      )
+    }
+  },
+  {
+    id: 2,
+    title: 'The Shift Key (K)',
+    subtitle: 'How Shift Mechanics Work',
+    icon: 'vpn_key',
+    conceptTag: 'DIRECTIVE 02 // KEY MECHANICS',
+    intel1: {
+      tag: 'ALGORITHM',
+      title: 'Shift Value (K)',
+      text: (
+        <>
+          Key <strong>K</strong> specifies displacement. Position indexes wrap around automatically from <strong>Z (25)</strong> back to <strong>A (0)</strong>.
+        </>
+      )
+    },
+    intel2: {
+      tag: 'TRY IT NOW',
+      title: 'Interactive Test',
+      text: (
+        <>
+          Drag the <strong>cyan slider</strong> in the screen above to watch the ciphertext alphabet shift dynamically in real-time.
+        </>
+      )
+    }
+  },
+  {
+    id: 3,
+    title: 'Encrypting a Message',
+    subtitle: 'Character-by-Character Encoding',
+    icon: 'lock',
+    conceptTag: 'DIRECTIVE 03 // ENCRYPTION PIPELINE',
+    intel1: {
+      tag: 'OPERATION',
+      title: 'Sequence Encoding',
+      text: (
+        <>
+          Letters process one-by-one. With <strong>Key = 3</strong>, <strong>SECRET</strong> encrypts into <strong>V H F U H W</strong>.
+        </>
+      )
+    },
+    intel2: {
+      tag: 'PROTOCOL',
+      title: 'Punctuation Bypass',
+      text: (
+        <>
+          Non-alphabetic symbols (spaces, numbers, and punctuation) pass through <strong>unmodified</strong>.
+        </>
+      )
+    }
+  },
+  {
+    id: 4,
+    title: 'Decrypting Intercepted Data',
+    subtitle: 'Reversing the Cipher',
+    icon: 'lock_open',
+    conceptTag: 'DIRECTIVE 04 // DECRYPTION PIPELINE',
+    intel1: {
+      tag: 'DECRYPTION',
+      title: 'Inverse Shift',
+      text: (
+        <>
+          Subtract key value <strong>K</strong> from ciphertext letters to slide backwards and reveal the original plaintext.
+        </>
+      )
+    },
+    intel2: {
+      tag: 'LOOP RULE',
+      title: 'Underflow Wrap',
+      text: (
+        <>
+          If subtraction yields a position index below <strong>A</strong>, simply add <strong>26</strong> to wrap back to <strong>Z</strong>.
+        </>
+      )
+    }
+  },
+  {
+    id: 5,
+    title: 'Cryptanalysis & Weaknesses',
+    subtitle: 'Brute-Force & Frequency Attacks',
+    icon: 'warning',
+    conceptTag: 'DIRECTIVE 05 // CRYPTANALYSIS',
+    intel1: {
+      tag: 'VULNERABILITY',
+      title: 'Small Key Space',
+      text: (
+        <>
+          Only <strong>25 possible shift keys</strong> exist. Automated scanners can crack Caesar ciphers in microseconds.
+        </>
+      )
+    },
+    intel2: {
+      tag: 'MISSION READY',
+      title: 'Operational Status',
+      text: (
+        <>
+          Briefing complete! You are ready to crack intercepted dispatches in <strong>CipherQuest stages</strong>.
+        </>
+      )
+    }
+  }
+];
+
+const PLAIN_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+
+// 5-letter target cipher word for Step 5: "D S S O H" (Decrypts to "A P P L E" when Key = 3)
+const STEP5_CIPHER_WORD = ['D', 'S', 'S', 'O', 'H'];
+
+export default function CaesarTutorialModal({ isOpen, onClose, onComplete, skipButtonText = 'Skip Tutorial' }) {
+  const { user, refreshProfile } = useAuth();
+  const [currentStep, setCurrentStep] = useState(0);
+  const [shiftKey, setShiftKey] = useState(3);
+  const [isPlaying, setIsPlaying] = useState(true);
+  const [isClosing, setIsClosing] = useState(false);
+  const [dontShowAgain, setDontShowAgain] = useState(false);
+
+  // Step 3 animation state (Word encryption stepper)
+  const [encryptCharIdx, setEncryptCharIdx] = useState(0);
+  const sampleWord = ['S', 'E', 'C', 'R', 'E', 'T'];
+
+  // Step 5 animation state (Brute force scanner)
+  const [scanKey, setScanKey] = useState(1);
+  const [scannerFound, setScannerFound] = useState(false);
+
+  // Sync preference on open
+  useEffect(() => {
+    if (!isOpen) return;
+
+    let isCancelled = false;
+
+    if (user?.tutorialDismissed && typeof user.tutorialDismissed.caesar === 'boolean') {
+      setDontShowAgain(user.tutorialDismissed.caesar);
+    } else {
+      userApi.getTutorialPreferences()
+        .then((prefs) => {
+          if (!isCancelled && prefs && typeof prefs.caesar === 'boolean') {
+            setDontShowAgain(prefs.caesar);
+          }
+        })
+        .catch((err) => {
+          console.warn("Could not fetch tutorial preferences on open:", err);
+        });
+    }
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [isOpen, user?.tutorialDismissed?.caesar]);
+
+  const handleToggleDontShow = async (e) => {
+    const nextVal = Boolean(e.target.checked);
+    setDontShowAgain(nextVal);
+    try {
+      const res = await userApi.saveTutorialPreference('caesar', nextVal);
+      if (res && typeof res.caesar === 'boolean') {
+        setDontShowAgain(res.caesar);
+      }
+      if (refreshProfile) {
+        await refreshProfile();
+      }
+    } catch (err) {
+      console.error("Failed to save Caesar tutorial preference:", err);
+      setDontShowAgain(!nextVal);
+    }
+  };
+
+  // Reset states when changing step or reopening
+  useEffect(() => {
+    if (isOpen) {
+      setIsClosing(false);
+      setCurrentStep(0);
+      setEncryptCharIdx(0);
+      setScanKey(1);
+      setScannerFound(false);
+      setIsPlaying(true);
+    }
+  }, [isOpen]);
+
+  // Smooth exit handler
+  const triggerClose = () => {
+    setIsClosing(true);
+    setTimeout(() => {
+      if (onClose) onClose();
+    }, 220);
+  };
+
+  const triggerComplete = () => {
+    setIsClosing(true);
+    setTimeout(() => {
+      if (onComplete) onComplete();
+      if (onClose) onClose();
+    }, 220);
+  };
+
+  // Keyboard navigation & Esc key handler
+  useEffect(() => {
+    if (!isOpen || isClosing) return;
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        triggerClose();
+      } else if (e.key === 'ArrowRight') {
+        handleNext();
+      } else if (e.key === 'ArrowLeft') {
+        handlePrev();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, isClosing, currentStep]);
+
+  // Loop Step 3 word encryption stepper
+  useEffect(() => {
+    if (!isOpen || currentStep !== 2 || !isPlaying || isClosing) return;
+    const timer = setInterval(() => {
+      setEncryptCharIdx((prev) => (prev + 1) % (sampleWord.length + 1));
+    }, 1400);
+    return () => clearInterval(timer);
+  }, [isOpen, currentStep, isPlaying, isClosing]);
+
+  // Loop Step 5 brute force key scanner with dynamic candidate updates
+  useEffect(() => {
+    if (!isOpen || currentStep !== 4 || !isPlaying || isClosing) return;
+    const timer = setInterval(() => {
+      setScanKey((prevKey) => {
+        const nextKey = prevKey >= 25 ? 1 : prevKey + 1;
+        setScannerFound(nextKey === 3);
+        return nextKey;
+      });
+    }, 650);
+    return () => clearInterval(timer);
+  }, [isOpen, currentStep, isPlaying, isClosing]);
+
+  if (!isOpen) return null;
+
+  const stepData = TUTORIAL_STEPS[currentStep];
+
+  const handleNext = () => {
+    if (currentStep < TUTORIAL_STEPS.length - 1) {
+      setCurrentStep((prev) => prev + 1);
+    } else {
+      triggerComplete();
+    }
+  };
+
+  const handlePrev = () => {
+    if (currentStep > 0) {
+      setCurrentStep((prev) => prev - 1);
+    }
+  };
+
+  /* ─────────────────────────────────────────────────────────────
+     ANIMATION VIEWPORT RENDERER PER STEP
+  ───────────────────────────────────────────────────────────── */
+  const renderAnimationViewport = () => {
+    switch (currentStep) {
+      case 0:
+        return (
+          <div className="cq-tut-viewport cq-tut-step1-viewport">
+            <div className="cq-tut-laser-scanline" />
+            <div className="cq-tut-track-container">
+              <div className="cq-tut-track-label">PLAIN TEXT ALPHABET</div>
+              <div className="cq-tut-letters-row">
+                {PLAIN_ALPHABET.slice(0, 12).map((char, i) => (
+                  <div key={`p-${i}`} className="cq-tut-char-box cq-tut-char-plain">
+                    {char}
+                  </div>
+                ))}
+              </div>
+
+              <div className="cq-tut-align-connector">
+                <span className="material-symbols-outlined">sync_alt</span>
+              </div>
+
+              <div className="cq-tut-track-label">CIPHER TEXT (SHIFT = 0)</div>
+              <div className="cq-tut-letters-row">
+                {PLAIN_ALPHABET.slice(0, 12).map((char, i) => (
+                  <div key={`c-${i}`} className="cq-tut-char-box cq-tut-char-cipher">
+                    {char}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        );
+
+      case 1: {
+        const cipherAlphabet = PLAIN_ALPHABET.map((_, idx) => {
+          const shiftedIdx = (idx + shiftKey) % 26;
+          return PLAIN_ALPHABET[shiftedIdx];
+        });
+
+        return (
+          <div className="cq-tut-viewport cq-tut-step2-viewport">
+            <div className="cq-tut-shift-controls">
+              <div className="cq-tut-slider-group">
+                <label>SHIFT KEY (K): <span className="cq-tut-key-badge">+{shiftKey}</span></label>
+                <input
+                  type="range"
+                  min="1"
+                  max="25"
+                  value={shiftKey}
+                  onChange={(e) => setShiftKey(parseInt(e.target.value, 10))}
+                  className="cq-tut-slider"
+                />
+              </div>
+            </div>
+
+            <div className="cq-tut-interactive-shift-display">
+              <div className="cq-tut-letters-strip-wrapper">
+                <div className="cq-tut-strip-row">
+                  <span className="cq-tut-row-title">Plain:</span>
+                  {PLAIN_ALPHABET.slice(0, 10).map((char, idx) => (
+                    <div key={`step2-p-${idx}`} className="cq-tut-char-box cq-tut-char-plain">
+                      {char}
+                    </div>
+                  ))}
+                </div>
+
+                <div className="cq-tut-shift-arrows-row">
+                  {PLAIN_ALPHABET.slice(0, 10).map((_, idx) => (
+                    <span key={`arrow-${idx}`} className="material-symbols-outlined cq-tut-arrow-down">
+                      south
+                    </span>
+                  ))}
+                </div>
+
+                <div className="cq-tut-strip-row">
+                  <span className="cq-tut-row-title">Cipher:</span>
+                  {cipherAlphabet.slice(0, 10).map((char, idx) => (
+                    <div key={`step2-c-${idx}`} className="cq-tut-char-box cq-tut-char-cipher cq-tut-glow">
+                      {char}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      case 2:
+        return (
+          <div className="cq-tut-viewport cq-tut-step3-viewport">
+            <div className="cq-tut-word-container">
+              <div className="cq-tut-word-label">PLAIN WORD</div>
+              <div className="cq-tut-word-box">
+                {sampleWord.map((char, idx) => {
+                  const isActive = idx === encryptCharIdx;
+                  const isProcessed = idx < encryptCharIdx;
+                  return (
+                    <div
+                      key={`w-p-${idx}`}
+                      className={`cq-tut-word-tile ${isActive ? 'active-tile' : ''} ${isProcessed ? 'processed-tile' : ''}`}
+                    >
+                      {char}
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="cq-tut-process-arrow">
+                <span className="material-symbols-outlined">arrow_downward</span>
+                <span className="cq-tut-process-tag">Shift +3</span>
+              </div>
+
+              <div className="cq-tut-word-label">CIPHER RESULT</div>
+              <div className="cq-tut-word-box">
+                {sampleWord.map((char, idx) => {
+                  const pCode = char.charCodeAt(0) - 65;
+                  const cChar = String.fromCharCode(((pCode + 3) % 26) + 65);
+                  const isDone = idx < encryptCharIdx;
+                  return (
+                    <div
+                      key={`w-c-${idx}`}
+                      className={`cq-tut-word-tile cipher-tile ${isDone ? 'done-tile' : 'empty-tile'}`}
+                    >
+                      {isDone ? cChar : '?'}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        );
+
+      case 3:
+        return (
+          <div className="cq-tut-viewport cq-tut-step4-viewport">
+            <div className="cq-tut-decrypt-row">
+              <div className="cq-tut-decrypt-card cipher-card">
+                <span className="cq-tut-card-tag">CIPHER INPUT</span>
+                <span className="cq-tut-card-text">K H O O O</span>
+              </div>
+
+              <div className="cq-tut-decrypt-action">
+                <span className="material-symbols-outlined cq-tut-reverse-spin">sync</span>
+                <span className="cq-tut-key-sub">Subtract Key (-3)</span>
+              </div>
+
+              <div className="cq-tut-decrypt-card plain-card">
+                <span className="cq-tut-card-tag">PLAINTEXT OUTPUT</span>
+                <span className="cq-tut-card-text text-glow">H E L L O</span>
+              </div>
+            </div>
+          </div>
+        );
+
+      case 4: {
+        // Dynamically shift "D S S O H" backwards by scanKey
+        const currentDecryptedCandidate = STEP5_CIPHER_WORD.map((char) => {
+          const cCode = char.charCodeAt(0) - 65;
+          const pCode = (cCode - scanKey + 26) % 26;
+          return String.fromCharCode(pCode + 65);
+        }).join('  ');
+
+        return (
+          <div className="cq-tut-viewport cq-tut-step5-viewport">
+            <div className="cq-tut-scanner-panel">
+              <div className="cq-tut-scanner-header">
+                <span className="material-symbols-outlined text-warning">radar</span>
+                <span>CRYPTANALYSIS KEY SCANNER</span>
+              </div>
+
+              <div className="cq-tut-scanner-display">
+                <div className="cq-tut-scan-key-col">
+                  <span className="cq-tut-scan-label">Testing Key:</span>
+                  <span className={`cq-tut-scan-key-val ${scannerFound ? 'found-key' : ''}`}>
+                    K = {scanKey}
+                  </span>
+                </div>
+
+                <div className="cq-tut-scan-output-col">
+                  <span className="cq-tut-scan-label">Decrypted Candidate:</span>
+                  <div className={`cq-tut-candidate-text ${scannerFound ? 'matched-text' : ''}`}>
+                    {currentDecryptedCandidate}
+                  </div>
+                </div>
+              </div>
+
+              <div className={`cq-tut-scan-status ${scannerFound ? 'status-success' : 'status-scanning'}`}>
+                {scannerFound ? 'MATCH DETECTED (English Word Found)' : 'SCANNING ALL 25 KEYS...'}
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      default:
+        return null;
+    }
+  };
+
+  return (
+    <div className={`cq-tut-backdrop ${isClosing ? 'cq-tut-closing' : ''}`} onClick={triggerClose}>
+      <div className={`cq-tut-modal-container ${isClosing ? 'cq-tut-closing' : ''}`} onClick={(e) => e.stopPropagation()}>
+        {/* HEADER */}
+        <div className="cq-tut-header">
+          <div className="cq-tut-header-title">
+            <span className="material-symbols-outlined cq-tut-header-icon">{stepData.icon}</span>
+            <div>
+              <span className="cq-tut-category-label">FIELD MANUAL: CAESAR SHIFT</span>
+              <h2>{stepData.subtitle}</h2>
+            </div>
+          </div>
+
+          <div className="cq-tut-header-actions">
+            <label className="cq-tut-dont-show-checkbox">
+              <input
+                type="checkbox"
+                checked={dontShowAgain}
+                onChange={handleToggleDontShow}
+              />
+              <span className="cq-tut-custom-checkbox" />
+              <span className="cq-tut-dont-show-text">Don't show this again</span>
+            </label>
+            <button className="cq-tut-skip-btn" onClick={triggerClose} title={skipButtonText}>
+              <span>{skipButtonText}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* MAIN BODY */}
+        <div className="cq-tut-body">
+          {/* HERO ANIMATION VIEWPORT */}
+          <div className="cq-tut-animation-wrapper">
+            <div className="cq-tut-viewport-header">
+              <span className="cq-tut-badge">{stepData.conceptTag}</span>
+              <div className="cq-tut-viewport-controls">
+                <button
+                  className="cq-tut-icon-btn"
+                  onClick={() => setIsPlaying(!isPlaying)}
+                  title={isPlaying ? 'Pause Loop' : 'Play Loop'}
+                >
+                  <span className="material-symbols-outlined">
+                    {isPlaying ? 'pause' : 'play_arrow'}
+                  </span>
+                </button>
+              </div>
+            </div>
+
+            {renderAnimationViewport()}
+          </div>
+
+          {/* DYNAMIC DUAL INTEL GRID */}
+          <div className="cq-tut-intel-grid">
+            <div className="cq-tut-intel-card core-card">
+              <div className="cq-tut-intel-header">
+                <span className="cq-tut-intel-tag tag-cyan">{stepData.intel1.tag}</span>
+                <h4>{stepData.intel1.title}</h4>
+              </div>
+              <p className="cq-tut-intel-text">{stepData.intel1.text}</p>
+            </div>
+
+            <div className="cq-tut-intel-card tip-card">
+              <div className="cq-tut-intel-header">
+                <span className="cq-tut-intel-tag tag-amber">{stepData.intel2.tag}</span>
+                <h4>{stepData.intel2.title}</h4>
+              </div>
+              <p className="cq-tut-intel-text">{stepData.intel2.text}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* FOOTER */}
+        <div className="cq-tut-footer">
+          <div className="cq-tut-footer-left">
+            <button
+              className="cq-tut-nav-btn prev-btn"
+              onClick={handlePrev}
+              disabled={currentStep === 0}
+            >
+              <span className="material-symbols-outlined">chevron_left</span>
+              <span>Back</span>
+            </button>
+          </div>
+
+          {/* PROGRESS PILLS */}
+          <div className="cq-tut-progress-pills">
+            {TUTORIAL_STEPS.map((step, idx) => (
+              <button
+                key={`pill-${step.id}`}
+                className={`cq-tut-pill ${idx === currentStep ? 'active' : ''} ${idx < currentStep ? 'completed' : ''}`}
+                onClick={() => setCurrentStep(idx)}
+                title={`Go to Step ${idx + 1}`}
+              />
+            ))}
+          </div>
+
+          <button className="cq-tut-nav-btn next-btn" onClick={handleNext}>
+            <span>{currentStep === TUTORIAL_STEPS.length - 1 ? 'Start Mission' : 'Next Step'}</span>
+            <span className="material-symbols-outlined">chevron_right</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+

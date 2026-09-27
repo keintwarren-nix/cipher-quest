@@ -1,7 +1,10 @@
-import { Navigate } from "react-router-dom";
+/* eslint-disable react-hooks/exhaustive-deps */
+import { useState, useEffect, useRef } from "react";
+import { Navigate, useLocation } from "react-router-dom";
 import "./CipherGame.css";
 
 import { useAuth } from "../../context/AuthContext";
+import { userApi } from "../../api/cipherQuestApi";
 import { useGameFlow } from "./core/hooks/useGameFlow";
 import { ScoringProvider } from "./core/hooks/ScoringContext";
 
@@ -12,6 +15,11 @@ import CompletionModal    from "./ui/CompletionModal";
 import StageScoreModal    from "./ui/StageScoreModal";
 import StageLeaderboard   from "./ui/StageLeaderboard";
 import StageFailNotice    from "./ui/StageFailNotice";
+
+// Caesar, Vigenere & Playfair tutorials
+import CaesarTutorialModal from "./features/caesar/CaesarTutorialModal";
+import VigenereTutorialModal from "./features/vigenere/VigenereTutorialModal";
+import PlayfairTutorialModal from "./features/playfair/PlayfairTutorialModal";
 
 // Caesar games
 import CaesarFishingGame from "./features/caesar/CaesarFishingGame";
@@ -29,11 +37,85 @@ import PlayfairSprint      from "./features/playfair/PlayfairSprint";
 export default function CipherGame() {
   const game = useGameFlow();
   const { user } = useAuth();
+  const location = useLocation();
+  const [showCaesarTutorial, setShowCaesarTutorial] = useState(false);
+  const [showVigenereTutorial, setShowVigenereTutorial] = useState(false);
+  const [showPlayfairTutorial, setShowPlayfairTutorial] = useState(false);
+  const handledCategorySelectionRef = useRef(null);
+
+  // Auto-open strictly on category selection from Dashboard
+  useEffect(() => {
+    if (location.state?.showTutorial) {
+      const activeCat = location.state?.category || game.category;
+      if (!activeCat) return;
+
+      const navKey = `${activeCat}-${location.key || location.search || 'entry'}`;
+      if (handledCategorySelectionRef.current === navKey) {
+        return;
+      }
+      handledCategorySelectionRef.current = navKey;
+
+      // Clear the showTutorial flag from history state so it cannot re-trigger during in-cipher actions
+      try {
+        if (window.history?.replaceState) {
+          const currentState = window.history.state || {};
+          window.history.replaceState(
+            {
+              ...currentState,
+              usr: { ...(currentState.usr || {}), category: activeCat, showTutorial: false },
+            },
+            ''
+          );
+        }
+      } catch {
+        // ignore history state write errors
+      }
+
+      let isCancelled = false;
+
+      const checkAndTriggerTutorial = async () => {
+        let isDismissed;
+        try {
+          if (user?.tutorialDismissed && typeof user.tutorialDismissed[activeCat] === 'boolean') {
+            isDismissed = user.tutorialDismissed[activeCat];
+          } else {
+            const prefs = await userApi.getTutorialPreferences();
+            isDismissed = Boolean(prefs?.[activeCat]);
+          }
+        } catch (err) {
+          console.warn("Failed to fetch tutorial preference, falling back to showing tutorial:", err);
+          isDismissed = false;
+        }
+
+        if (isCancelled) return;
+
+        if (!isDismissed) {
+          if (activeCat === 'caesar') setShowCaesarTutorial(true);
+          else if (activeCat === 'vigenere') setShowVigenereTutorial(true);
+          else if (activeCat === 'playfair') setShowPlayfairTutorial(true);
+        }
+      };
+
+      checkAndTriggerTutorial();
+
+      return () => {
+        isCancelled = true;
+      };
+    }
+  }, [location.key, location.state?.showTutorial, location.state?.category]);
+
+  const handleOpenManual = (cat) => {
+    const targetCat = cat || game.category;
+    if (targetCat === 'caesar') setShowCaesarTutorial(true);
+    else if (targetCat === 'vigenere') setShowVigenereTutorial(true);
+    else if (targetCat === 'playfair') setShowPlayfairTutorial(true);
+  };
+
   const {
     category, difficulty, currentStage,
     progress, completionModalData,
     goToCategories, selectDifficulty,
-    startStage,
+    startStage, startStageTimer,
     completeStage, backToStages, replayCurrentStage,
     handleContinueNextDifficulty, handleCloseCompletionModal,
     returnToRoadmap,
@@ -50,18 +132,16 @@ export default function CipherGame() {
 
     dismissStageResult();
 
-    // If completion modal data is pending (e.g. tier finished), let CompletionModal show next
-    if (!completionModalData) {
-      if (typeof stageIdx === 'number' && stageIdx >= 0 && stageIdx < 4) {
-        // Auto-advance directly to the next stage (Stage 1 -> 2 -> 3 -> 4 -> 5)
-        startStage(cat, diff, stageIdx + 1);
-      } else if (returnToRoadmap) {
-        returnToRoadmap(cat, diff);
-      } else {
-        if (cat) game.selectCategory?.(cat);
-        if (diff) selectDifficulty(diff);
-        backToStages();
-      }
+    if (typeof stageIdx === 'number' && stageIdx >= 0 && stageIdx < 4) {
+      // Auto-advance directly to the next stage (Stage 1 -> 2 -> 3 -> 4 -> 5)
+      startStage(cat, diff, stageIdx + 1);
+    } else if (returnToRoadmap) {
+      // Last stage of tier (stageIndex >= 4): route to roadmap with tier complete
+      returnToRoadmap(cat, diff);
+    } else {
+      if (cat) game.selectCategory?.(cat);
+      if (diff) selectDifficulty(diff);
+      backToStages();
     }
   };
 
@@ -75,6 +155,7 @@ export default function CipherGame() {
       onBackToStages: backToStages,
       onVerifySubmit: completeStage,
       onReplayNewQuestion: replayCurrentStage,
+      onStartStageTimer: startStageTimer,
       // SCORING SYSTEM: games call this when the player fails (streak reset)
       onStageFail: failStage,
     };
@@ -129,6 +210,7 @@ export default function CipherGame() {
           <StageScoreModal
             result={stageResult}
             onContinue={handleContinueFromScore}
+            onBack={() => returnToRoadmap(stageResult.category || category, stageResult.difficulty || difficulty)}
             onViewLeaderboard={() => openStageLeaderboard(
               stageResult.category, stageResult.difficulty, stageResult.stageIndex)}
             onReplay={() => {
@@ -169,13 +251,14 @@ export default function CipherGame() {
         />
 
         {difficulty ? (
-          <StageRoadmap game={game} />
+          <StageRoadmap game={game} onOpenTutorial={() => handleOpenManual(category)} />
         ) : (
           <DifficultySelector
             activeCategory={category}
             completedLevels={progress}
             onSelectDifficulty={selectDifficulty}
             onBack={goToCategories}
+            onOpenTutorial={() => handleOpenManual(category)}
           />
         )}
 
@@ -184,6 +267,7 @@ export default function CipherGame() {
           <StageScoreModal
             result={stageResult}
             onContinue={handleContinueFromScore}
+            onBack={() => returnToRoadmap(stageResult.category || category, stageResult.difficulty || difficulty)}
             onViewLeaderboard={() => openStageLeaderboard(
               stageResult.category, stageResult.difficulty, stageResult.stageIndex)}
             onReplay={() => {
@@ -204,6 +288,24 @@ export default function CipherGame() {
         {leaderboardStage && (
           <StageLeaderboard stage={leaderboardStage} onClose={closeStageLeaderboard} />
         )}
+
+        {/* Caesar Tutorial Modal */}
+        <CaesarTutorialModal
+          isOpen={showCaesarTutorial}
+          onClose={() => setShowCaesarTutorial(false)}
+        />
+
+        {/* Vigenere Tutorial Modal */}
+        <VigenereTutorialModal
+          isOpen={showVigenereTutorial}
+          onClose={() => setShowVigenereTutorial(false)}
+        />
+
+        {/* Playfair Tutorial Modal */}
+        <PlayfairTutorialModal
+          isOpen={showPlayfairTutorial}
+          onClose={() => setShowPlayfairTutorial(false)}
+        />
       </div>
     );
   }

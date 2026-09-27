@@ -33,10 +33,20 @@ const vigenereDecryptChar = (cipherChar, keyShift) => {
   return cipherChar;
 };
 
-const getRandomDecoys = (correctChar, count) => {
-  const pool = ALPHABET.filter((c) => c !== correctChar);
-  const shuffled = [...pool].sort(() => Math.random() - 0.5);
-  return shuffled.slice(0, count);
+const getRandomDecoys = (correctChar, count, tier = 'easy') => {
+  const normTier = String(tier || 'easy').toLowerCase();
+  const radius = normTier === 'easy' ? 4 : normTier === 'medium' ? 5 : 6;
+  const targetIdx = (correctChar || 'A').toUpperCase().charCodeAt(0) - 65;
+  const pool = [];
+  for (let offset = 1; offset <= radius; offset++) {
+    pool.push(ALPHABET[(targetIdx + offset) % 26]);
+    pool.push(ALPHABET[(targetIdx - offset + 26) % 26]);
+  }
+  const uniquePool = Array.from(new Set(pool)).filter((c) => c !== correctChar);
+  const shuffled = uniquePool.sort(() => Math.random() - 0.5);
+  if (shuffled.length >= count) return shuffled.slice(0, count);
+  const allOther = ALPHABET.filter((c) => c !== correctChar && !shuffled.includes(c)).sort(() => Math.random() - 0.5);
+  return [...shuffled, ...allOther].slice(0, count);
 };
 
 const tabulaRow = (keyLetter) => {
@@ -55,6 +65,7 @@ export default function VigenereSprint({
   onVerifySubmit,
   onBackToStages,
   onReplayNewQuestion,
+  onStartStageTimer,
 }) {
   const {
     containerRef: fsContainerRef,
@@ -179,8 +190,7 @@ export default function VigenereSprint({
      Derived (re-compute each render, cheap)
      ─────────────────────────────────────────────── */
   const targetKey = levelData?.targetKey || levelData?.keyword || levelData?.key || 'KEY';
-  const keyClue = levelData?.keyClue || levelData?.keywordClue || levelData?.clue || '';
-  const hint = levelData?.hint || '';
+  const cleanHint = levelData?.hint ? levelData.hint.trim() : '';
   const currentIdx = maskedIndices[currentMaskIndex] ?? 0;
   const currentBatonLetter = levelData.ciphertext[currentIdx] ?? '';
   const currentTargetChar = levelData.plaintext[currentIdx] ?? vigenereDecryptChar(currentBatonLetter, 0);
@@ -360,7 +370,7 @@ export default function VigenereSprint({
 
     const tempIdx = maskedIndices[currentMaskIndexRef.current] ?? 0;
     const targetChar = currentTargetChar || (levelData.plaintext[tempIdx] ?? '');
-    const [decoy1, decoy2] = getRandomDecoys(targetChar, 2);
+    const [decoy1, decoy2] = getRandomDecoys(targetChar, 2, tier);
     const otherLanes = [0, 1, 2].filter((l) => l !== randLane);
 
     const startX = COIN_START_X;
@@ -382,7 +392,7 @@ export default function VigenereSprint({
       slimesRef.current = combined;
       return combined;
     });
-  }, [clearPhaseTimer, currentTargetChar, maskedIndices, levelData.plaintext]);
+  }, [clearPhaseTimer, currentTargetChar, maskedIndices, levelData.plaintext, tier]);
 
   /* ───────────────────────────────────────────────
      Phase 3: Resolved (immediate on diamond pick or miss)
@@ -911,6 +921,7 @@ export default function VigenereSprint({
             stageIndex={(levelData.level || 1) - 1}
             onLoadingComplete={() => {
               setIsOperationLoading(false);
+              onStartStageTimer?.();
               handleStartSprint();
             }}
           />
@@ -951,16 +962,10 @@ export default function VigenereSprint({
                     <span className="cq-dossier-label">KEYWORD</span>
                     <span className="cq-dossier-value yellow-mono">{targetKey}</span>
                   </div>
-                  {keyClue && (
-                    <div className="cq-dossier-row">
-                      <span className="cq-dossier-label">KEYWORD CLUE</span>
-                      <span className="cq-dossier-value yellow-mono">{keyClue}</span>
-                    </div>
-                  )}
-                  {hint && (
+                  {cleanHint && (
                     <div className="cq-dossier-row">
                       <span className="cq-dossier-label">HINT</span>
-                      <span className="cq-dossier-value hint-text">{hint}</span>
+                      <span className="cq-dossier-value hint-text">{cleanHint}</span>
                     </div>
                   )}
                 </div>
@@ -1274,11 +1279,9 @@ export default function VigenereSprint({
                 </div>
               </div>
             </div>
-            {(keyClue || hint) && (
+            {cleanHint && (
               <div className="caesar-floating-hint">
-                {keyClue && <span>💡 Keyword clue: <strong>"{keyClue}"</strong></span>}
-                {keyClue && hint && <span style={{ margin: '0 8px', opacity: 0.4 }}>·</span>}
-                {hint && <span>Hint: <strong>"{hint}"</strong></span>}
+                💡 Hint: <strong>"{cleanHint}"</strong>
               </div>
             )}
           </div>
@@ -1301,7 +1304,6 @@ export default function VigenereSprint({
               <div className="vg-alignment-labels">
                 <div>CIPHER</div>
                 <div>KEY</div>
-                <div>SHIFT</div>
                 <div style={{ color: 'var(--neon-green)' }}>PLAIN</div>
               </div>
               <div className="vg-alignment-container">
@@ -1339,7 +1341,6 @@ export default function VigenereSprint({
                     >
                       <span className="vg-align-cipher">{cipherCh}</span>
                       <span className="vg-align-key">{keyCh}</span>
-                      <span className="vg-align-shift">-{shiftVal}</span>
                       <span
                         className="vg-align-plain"
                         style={{
@@ -1648,8 +1649,9 @@ function CrashPanel({ message, onContinue }) {
 function useMemoLevelMeta(levelData, tier) {
   return React.useMemo(() => {
     const hintIndices = new Set();
-    if (tier === 'easy' || tier === 'medium') {
-      const numHints = tier === 'easy' ? 2 : 1;
+    const normTier = String(tier || 'easy').toLowerCase();
+    if (normTier === 'easy' || normTier === 'medium') {
+      const numHints = normTier === 'easy' ? 2 : 1;
       let hintsFound = 0;
       for (let i = 0; i < levelData.plaintext.length; i++) {
         if (

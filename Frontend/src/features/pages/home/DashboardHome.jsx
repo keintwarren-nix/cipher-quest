@@ -2,6 +2,9 @@ import { useState, useContext, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../../context/AuthContext';
 import { DashboardChromeContext } from '../../layout/DashboardLayout';
+import CaesarTutorialModal from '../../ciphergame/features/caesar/CaesarTutorialModal';
+import VigenereTutorialModal from '../../ciphergame/features/vigenere/VigenereTutorialModal';
+import PlayfairTutorialModal from '../../ciphergame/features/playfair/PlayfairTutorialModal';
 import './DashboardHome.css';
 
 const DashboardHome = () => {
@@ -9,6 +12,7 @@ const DashboardHome = () => {
   const { user, logout } = useAuth();
   const { openSettings } = useContext(DashboardChromeContext);
   const [showTutorial, setShowTutorial] = useState(false);
+  const [tutorialCategory, setTutorialCategory] = useState('caesar');
   const [activeCardId, setActiveCardId] = useState(null);
   const [cooldownRemaining, setCooldownRemaining] = useState('');
 
@@ -385,13 +389,13 @@ const DashboardHome = () => {
                   onFocus={() => setActiveCardId(card.id)}
                   onClick={() => {
                     setActiveCardId(card.id);
-                    navigate('/dashboard/ciphergame', { state: { category: card.id } });
+                    navigate('/dashboard/ciphergame', { state: { category: card.id, showTutorial: true } });
                   }}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === ' ') {
                       e.preventDefault();
                       setActiveCardId(card.id);
-                      navigate('/dashboard/ciphergame', { state: { category: card.id } });
+                      navigate('/dashboard/ciphergame', { state: { category: card.id, showTutorial: true } });
                     }
                   }}
                 >
@@ -421,6 +425,7 @@ const DashboardHome = () => {
                       className="dh-card-show-tutorial-btn"
                       onClick={(e) => {
                         e.stopPropagation();
+                        setTutorialCategory(card.id);
                         setShowTutorial(true);
                       }}
                     >
@@ -435,63 +440,25 @@ const DashboardHome = () => {
         </div>
       </div>
 
-      {/* Tutorial Modal */}
-      {showTutorial && (
-        <div className="settings-modal-overlay" onClick={() => setShowTutorial(false)}>
-          <div className="settings-modal-content cq-tutorial-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="settings-modal-header">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <span className="material-symbols-outlined text-primary" style={{ color: 'var(--neon-cyan, #00e5ff)' }}>menu_book</span>
-                <h2>CipherQuest Field Manual</h2>
-              </div>
-              <button className="settings-close-btn" onClick={() => setShowTutorial(false)}>
-                <span className="material-symbols-outlined">close</span>
-              </button>
-            </div>
-
-            <div className="settings-modal-body cq-tutorial-body" style={{ maxHeight: '65vh', overflowY: 'auto' }}>
-              <div className="cq-tutorial-section">
-                <h3>🔤 1. Caesar Shift</h3>
-                <p>
-                  Shift letters of the alphabet by a fixed numeric key. Learn monoalphabetic substitution through modular math.
-                </p>
-              </div>
-
-              <div className="cq-tutorial-section">
-                <h3>🔑 2. Vigenère Matrix</h3>
-                <p>
-                  Polyalphabetic substitution using a repeating keyword. Decrypt repeating keyword shifts dynamically.
-                </p>
-              </div>
-
-              <div className="cq-tutorial-section">
-                <h3>🗂️ 3. Playfair Matrix</h3>
-                <p>
-                  Encrypt pairs of letters (digraphs) inside a 5×5 key matrix using row, column, and rectangular swaps.
-                </p>
-              </div>
-
-              <div className="cq-tutorial-section">
-                <h3>🎮 4. Arcade Operations</h3>
-                <p>
-                  • 🎣 <strong>Fishing:</strong> Reel in letters or keyword slots.<br />
-                  • 🟡 <strong>Pacman:</strong> Navigate maze and eat correct ghosts.<br />
-                  • 🏃 <strong>Sprint:</strong> Relay run through ciphertext lanes.
-                </p>
-              </div>
-            </div>
-
-            <div style={{ padding: '16px 28px', borderTop: '1px solid rgba(0, 229, 255, 0.1)', textAlign: 'right' }}>
-              <button
-                className="fg-btn fg-btn-primary"
-                onClick={() => setShowTutorial(false)}
-                style={{ background: 'var(--neon-cyan, #00e5ff)', color: '#030914', border: 'none', padding: '10px 20px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' }}
-              >
-                Got It, Operative!
-              </button>
-            </div>
-          </div>
-        </div>
+      {/* Tutorial Modals for Dashboard in-place view */}
+      {tutorialCategory === 'vigenere' ? (
+        <VigenereTutorialModal
+          isOpen={showTutorial}
+          onClose={() => setShowTutorial(false)}
+          skipButtonText="Close Tutorial"
+        />
+      ) : tutorialCategory === 'playfair' ? (
+        <PlayfairTutorialModal
+          isOpen={showTutorial}
+          onClose={() => setShowTutorial(false)}
+          skipButtonText="Close Tutorial"
+        />
+      ) : (
+        <CaesarTutorialModal
+          isOpen={showTutorial}
+          onClose={() => setShowTutorial(false)}
+          skipButtonText="Close Tutorial"
+        />
       )}
     </div>
   );
