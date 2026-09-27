@@ -1,0 +1,11 @@
+name = "cipher-quest"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+[assets]
+directory = "./Frontend/dist"
+html_handling = "auto-trailing-slash"
+not_found_handling = "single-page-application"
+
+[build]
+command = "cd Frontend && npm install && npm run build"
